@@ -1,0 +1,7 @@
+.idea/
+Lib/
+Scripts/
+__pycache__/
+
+pyvenv.cfg
+computer_enhance-main.zip
