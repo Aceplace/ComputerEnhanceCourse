@@ -1,4 +1,4 @@
-from bit_manipulation_helpers import int_as_u16_hex_str, value_fits_in_two_bytes, value_fits_in_byte
+from bit_manipulation_helpers import int_as_u16_hex_str
 from decoder_8086 import decode, Operation, InstructionType, RegisterMnemonic, OperandType
 import enum
 import sys
@@ -89,8 +89,6 @@ class Register:
 
     def set_value_in_part(self, value: int, register_part: RegisterPart):
         assert register_part is not None, 'Register part not set'
-        assert register_part != RegisterPart.FULL or value_fits_in_two_bytes(value), 'Value must be 16 bits'
-        assert not register_part.is_half() or value_fits_in_byte(value), 'Value must be 8 bits'
 
         if register_part == RegisterPart.FULL:
             self.value = value
@@ -102,6 +100,12 @@ class Register:
             high_byte: int = value
             lo_byte: int = self.value & 0xff
             self.value = (high_byte << 8) | lo_byte
+
+
+class ProcessorFlags(enum.Flag):
+    NONE = 0
+    ZERO = enum.auto()
+    SIGN = enum.auto()
 
 
 class Processor8086:
@@ -136,6 +140,8 @@ class Processor8086:
             RegisterType.CS: self.registers[11],
         }
 
+        self.flags: ProcessorFlags = ProcessorFlags.NONE
+
     def get_register_from_mnemonic(self, register_mnemonic: RegisterMnemonic):
         register_type: RegisterType = register_mnemonic_to_register_type_map[register_mnemonic]
         register: Register = self.register_type_to_registers_map[register_type]
@@ -158,11 +164,43 @@ class Processor8086:
                 src_register_part: RegisterPart = get_register_part_from_mnemonic(operand_two_register_mnemonic)
                 value: int = src_register.get_value_in_part(src_register_part)
                 dst_register.set_value_in_part(value, dst_register_part)
+        elif operation.instruction_type in [InstructionType.ADD, InstructionType.SUB, InstructionType.CMP]:
+            # assuming operand one is register
+            operand_one_register_mnemonic: RegisterMnemonic = operation.operand_one.value
+            dst_register: Register = self.get_register_from_mnemonic(operand_one_register_mnemonic)
+            dst_register_part: RegisterPart = get_register_part_from_mnemonic(operand_one_register_mnemonic)
+            operand_one_value: int = dst_register.get_value_in_part(dst_register_part)
 
-    def print_register_state(self):
+            if operation.operand_two.operand_type.is_immediate_value():
+                operand_two_value: int = operation.operand_two.value
+            else:  # Assume it is another register
+                operand_two_register_mnemonic: RegisterMnemonic = operation.operand_two.value
+                src_register: Register = self.get_register_from_mnemonic(operand_two_register_mnemonic)
+                src_register_part: RegisterPart = get_register_part_from_mnemonic(operand_two_register_mnemonic)
+                operand_two_value: int = src_register.get_value_in_part(src_register_part)
+
+            if operation.instruction_type == InstructionType.ADD:
+                result: int = operand_one_value + operand_two_value
+            else:
+                result: int = operand_one_value - operand_two_value
+
+            if result > 65535 or result < -32768:
+                result &= 0xffff
+
+            self.flags = ProcessorFlags.NONE
+            if (result & 0b1000000000000000) > 0:
+                self.flags |= ProcessorFlags.SIGN
+            if result == 0:
+                self.flags |= ProcessorFlags.ZERO
+
+            if operation.instruction_type != InstructionType.CMP:
+                dst_register.set_value_in_part(result, dst_register_part)
+
+    def print_register_and_flag_state(self):
         print('Register State:')
         for register in self.registers:
             print(f'\t{register}')
+        print(f'Flags: {"S" if self.flags & ProcessorFlags.SIGN else ""}{"Z" if self.flags & ProcessorFlags.ZERO else ""}')
 
 
 def main():
@@ -174,12 +212,13 @@ def main():
         operations: list[Operation] = decode(byte_reader)
 
     simulator: Processor8086 = Processor8086()
-    simulator.print_register_state()
+    simulator.print_register_and_flag_state()
+    print()
     for operation in operations:
         simulator.simulate_operation(operation)
         print(operation)
-        simulator.print_register_state()
-        print('\n')
+        simulator.print_register_and_flag_state()
+        print()
 
 
 if __name__ == '__main__':
