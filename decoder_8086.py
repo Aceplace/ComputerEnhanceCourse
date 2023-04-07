@@ -195,6 +195,11 @@ class InstructionType(enum.Enum):
     def __str__(self):
         return self.name.lower()
 
+    def is_jmp(self):
+        return self in [InstructionType.JO, InstructionType.JNO, InstructionType.JB, InstructionType.JAE, InstructionType.JE, InstructionType.JNE,
+                        InstructionType.JBE, InstructionType.JA, InstructionType.JS, InstructionType.JNS, InstructionType.JP, InstructionType.JNP,
+                        InstructionType.JL, InstructionType.JGE, InstructionType.JLE, InstructionType.JG]
+
 
 opcodes_to_jmp_instructions_map: Dict[int, InstructionType] = {
     112: InstructionType.JO,
@@ -255,6 +260,7 @@ class Operation:
         self.instruction_type: InstructionType = InstructionType.NONE
         self.operand_one: Operand = Operand()
         self.operand_two: Operand = Operand()
+        self.num_bytes: int = 0
 
     def __str__(self):
         return self.get_decode_str()
@@ -309,6 +315,8 @@ def create_effective_address_operand(effective_address_calculation: EffectiveAdd
 def decode(byte_reader: ByteReader) -> list[Operation]:
     operations: list[Operation] = []
     while not byte_reader.is_at_end():
+        byte_reader_start_index = byte_reader.index
+
         current_byte: int = byte_reader.peek_as_u8()
 
         operation: Operation
@@ -321,6 +329,8 @@ def decode(byte_reader: ByteReader) -> list[Operation]:
         else:
             assert False, f'Unknown opcode {current_byte}'
 
+        byte_reader_end_index: int = byte_reader.index
+        operation.num_bytes = byte_reader_end_index - byte_reader_start_index
         operations.append(operation)
     return operations
 

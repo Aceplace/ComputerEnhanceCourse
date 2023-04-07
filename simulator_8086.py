@@ -1,3 +1,5 @@
+from typing import Optional
+
 from bit_manipulation_helpers import int_as_u16_hex_str
 from decoder_8086 import decode, Operation, InstructionType, RegisterMnemonic, OperandType
 import enum
@@ -141,13 +143,20 @@ class Processor8086:
         }
 
         self.flags: ProcessorFlags = ProcessorFlags.NONE
+        self.instruction_ptr = 0
+        self.operation_stream: Optional[list[Operation]] = None
+        self.operation_stream_index: int = 0
 
     def get_register_from_mnemonic(self, register_mnemonic: RegisterMnemonic):
         register_type: RegisterType = register_mnemonic_to_register_type_map[register_mnemonic]
         register: Register = self.register_type_to_registers_map[register_type]
         return register
 
-    def simulate_operation(self, operation: Operation):
+    def simulate_operation(self):
+        operation: Operation = self.operation_stream[self.operation_stream_index]
+        self.instruction_ptr += operation.num_bytes
+        self.operation_stream_index += 1
+
         if operation.instruction_type == InstructionType.MOV:
             assert operation.operand_one.operand_type in [OperandType.REGISTER, OperandType.EFFECTIVE_ADDRESS], 'Must move into a register or memory location'
             # assuming operand one is register
@@ -195,6 +204,37 @@ class Processor8086:
 
             if operation.instruction_type != InstructionType.CMP:
                 dst_register.set_value_in_part(result, dst_register_part)
+        elif operation.instruction_type.is_jmp():
+            assert operation.instruction_type == InstructionType.JNE, 'Have not implemented other jmps yet'
+            jmp_amount: int = operation.operand_one.value
+
+            # assume its jmp not zero
+            if not (self.flags & ProcessorFlags.ZERO):
+                total_jmp_delta: int = 0
+                if jmp_amount > 0:
+                    while total_jmp_delta < jmp_amount:
+                        next_byte_jmp_delta: int = self.operation_stream[self.operation_stream_index].num_bytes
+                        total_jmp_delta += next_byte_jmp_delta
+                        self.instruction_ptr += next_byte_jmp_delta
+                        self.operation_stream_index += 1
+                        assert total_jmp_delta <= jmp_amount and self.operation_stream_index < len(self.operation_stream), 'Over shot the target for jmp'
+                elif jmp_amount < 0:
+                    while total_jmp_delta < abs(jmp_amount):
+                        previous_byte_jmp_delta: int = self.operation_stream[self.operation_stream_index - 1].num_bytes
+                        total_jmp_delta += previous_byte_jmp_delta
+                        self.instruction_ptr -= previous_byte_jmp_delta
+                        self.operation_stream_index -= 1
+                        assert total_jmp_delta <= abs(jmp_amount) and self.operation_stream_index > 0, 'Over shot the target for jmp'
+
+
+    def simulate(self):
+        while self.operation_stream_index < len(self.operation_stream):
+            print(self.operation_stream[self.operation_stream_index])
+            print(f'IP pre-op: {int_as_u16_hex_str(self.instruction_ptr)} {self.instruction_ptr}')
+            self.simulate_operation()
+            self.print_register_and_flag_state()
+            print(f'IP post-op: {int_as_u16_hex_str(self.instruction_ptr)} {self.instruction_ptr}')
+            print()
 
     def print_register_and_flag_state(self):
         print('Register State:')
@@ -213,16 +253,9 @@ def main():
 
     simulator: Processor8086 = Processor8086()
     simulator.print_register_and_flag_state()
-    print()
-    for operation in operations:
-        simulator.simulate_operation(operation)
-        print(operation)
-        simulator.print_register_and_flag_state()
-        print()
+    simulator.operation_stream = operations
+    simulator.simulate()
 
 
 if __name__ == '__main__':
     main()
-
-
-
